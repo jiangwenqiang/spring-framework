@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package org.springframework.context.annotation;
 
 import java.lang.instrument.ClassFileTransformer;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.context.annotation.EnableLoadTimeWeaving.AspectJWeaving;
 import org.springframework.context.support.GenericXmlApplicationContext;
@@ -27,7 +27,7 @@ import org.springframework.instrument.classloading.LoadTimeWeaver;
 import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * Unit tests for @EnableLoadTimeWeaving
@@ -40,7 +40,7 @@ public class EnableLoadTimeWeavingTests {
 	@Test
 	public void control() {
 		GenericXmlApplicationContext ctx =
-			new GenericXmlApplicationContext(getClass(), "EnableLoadTimeWeavingTests-context.xml");
+				new GenericXmlApplicationContext(getClass(), "EnableLoadTimeWeavingTests-context.xml");
 		ctx.getBean("loadTimeWeaver", LoadTimeWeaver.class);
 	}
 
@@ -50,7 +50,7 @@ public class EnableLoadTimeWeavingTests {
 		ctx.register(EnableLTWConfig_withAjWeavingDisabled.class);
 		ctx.refresh();
 		LoadTimeWeaver loadTimeWeaver = ctx.getBean("loadTimeWeaver", LoadTimeWeaver.class);
-		verifyZeroInteractions(loadTimeWeaver);
+		verifyNoInteractions(loadTimeWeaver);
 	}
 
 	@Test
@@ -61,7 +61,7 @@ public class EnableLoadTimeWeavingTests {
 		LoadTimeWeaver loadTimeWeaver = ctx.getBean("loadTimeWeaver", LoadTimeWeaver.class);
 		// no expectations -> a class file transformer should NOT be added
 		// because no META-INF/aop.xml is present on the classpath
-		verifyZeroInteractions(loadTimeWeaver);
+		verifyNoInteractions(loadTimeWeaver);
 	}
 
 	@Test
@@ -73,9 +73,11 @@ public class EnableLoadTimeWeavingTests {
 		verify(loadTimeWeaver).addTransformer(isA(ClassFileTransformer.class));
 	}
 
+
 	@Configuration
 	@EnableLoadTimeWeaving(aspectjWeaving=AspectJWeaving.DISABLED)
 	static class EnableLTWConfig_withAjWeavingDisabled implements LoadTimeWeavingConfigurer {
+
 		@Override
 		public LoadTimeWeaver getLoadTimeWeaver() {
 			return mock(LoadTimeWeaver.class);
@@ -85,6 +87,7 @@ public class EnableLoadTimeWeavingTests {
 	@Configuration
 	@EnableLoadTimeWeaving(aspectjWeaving=AspectJWeaving.AUTODETECT)
 	static class EnableLTWConfig_withAjWeavingAutodetect implements LoadTimeWeavingConfigurer {
+
 		@Override
 		public LoadTimeWeaver getLoadTimeWeaver() {
 			return mock(LoadTimeWeaver.class);
@@ -94,9 +97,11 @@ public class EnableLoadTimeWeavingTests {
 	@Configuration
 	@EnableLoadTimeWeaving(aspectjWeaving=AspectJWeaving.ENABLED)
 	static class EnableLTWConfig_withAjWeavingEnabled implements LoadTimeWeavingConfigurer {
+
 		@Override
 		public LoadTimeWeaver getLoadTimeWeaver() {
 			return mock(LoadTimeWeaver.class);
 		}
 	}
+
 }

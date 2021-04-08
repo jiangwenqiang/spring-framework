@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.Part;
 
@@ -189,6 +190,20 @@ public class RequestParamMethodArgumentResolver extends AbstractNamedValueMethod
 	protected void handleMissingValue(String name, MethodParameter parameter, NativeWebRequest request)
 			throws Exception {
 
+		handleMissingValueInternal(name, parameter, request, false);
+	}
+
+	@Override
+	protected void handleMissingValueAfterConversion(
+			String name, MethodParameter parameter, NativeWebRequest request) throws Exception {
+
+		handleMissingValueInternal(name, parameter, request, true);
+	}
+
+	protected void handleMissingValueInternal(
+			String name, MethodParameter parameter, NativeWebRequest request, boolean missingAfterConversion)
+			throws Exception {
+
 		HttpServletRequest servletRequest = request.getNativeRequest(HttpServletRequest.class);
 		if (MultipartResolutionDelegate.isMultipartArgument(parameter)) {
 			if (servletRequest == null || !MultipartResolutionDelegate.isMultipartRequest(servletRequest)) {
@@ -200,7 +215,7 @@ public class RequestParamMethodArgumentResolver extends AbstractNamedValueMethod
 		}
 		else {
 			throw new MissingServletRequestParameterException(name,
-					parameter.getNestedParameterType().getSimpleName());
+					parameter.getNestedParameterType().getSimpleName(), missingAfterConversion);
 		}
 	}
 

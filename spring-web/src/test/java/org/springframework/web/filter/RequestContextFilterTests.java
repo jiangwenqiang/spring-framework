@@ -17,24 +17,23 @@
 package org.springframework.web.filter;
 
 import java.io.IOException;
+
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import org.springframework.mock.web.test.MockFilterConfig;
-import org.springframework.mock.web.test.MockHttpServletRequest;
-import org.springframework.mock.web.test.MockHttpServletResponse;
-import org.springframework.mock.web.test.MockServletContext;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.testfixture.servlet.MockFilterConfig;
+import org.springframework.web.testfixture.servlet.MockHttpServletRequest;
+import org.springframework.web.testfixture.servlet.MockHttpServletResponse;
+import org.springframework.web.testfixture.servlet.MockServletContext;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 /**
  * @author Rod Johnson
@@ -64,8 +63,7 @@ public class RequestContextFilterTests {
 			public void doFilter(ServletRequest req, ServletResponse resp) throws IOException, ServletException {
 				++invocations;
 				if (invocations == 1) {
-					assertSame("myValue",
-							RequestContextHolder.currentRequestAttributes().getAttribute("myAttr", RequestAttributes.SCOPE_REQUEST));
+					assertThat(RequestContextHolder.currentRequestAttributes().getAttribute("myAttr", RequestAttributes.SCOPE_REQUEST)).isSameAs("myValue");
 					if (sex != null) {
 						throw sex;
 					}
@@ -84,23 +82,16 @@ public class RequestContextFilterTests {
 
 		try {
 			rbf.doFilter(req, resp, fc);
-			if (sex != null) {
-				fail();
-			}
+			assertThat(sex).isNull();
 		}
 		catch (ServletException ex) {
-			assertNotNull(sex);
+			assertThat(sex).isNotNull();
 		}
 
-		try {
-			RequestContextHolder.currentRequestAttributes();
-			fail();
-		}
-		catch (IllegalStateException ex) {
-			// Ok
-		}
+		assertThatIllegalStateException().isThrownBy(
+				RequestContextHolder::currentRequestAttributes);
 
-		assertEquals(1, fc.invocations);
+		assertThat(fc.invocations).isEqualTo(1);
 	}
 
 }

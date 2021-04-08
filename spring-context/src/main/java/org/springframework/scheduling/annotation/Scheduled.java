@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import java.lang.annotation.Repeatable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+
+import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 
 /**
  * Annotation that marks a method to be scheduled. Exactly one of the
@@ -60,8 +62,9 @@ public @interface Scheduled {
 	 * <p>This is primarily meant for use with <code>${...}</code> placeholders,
 	 * allowing for external disabling of corresponding scheduled methods.
 	 * @since 5.1
+	 * @see ScheduledTaskRegistrar#CRON_DISABLED
 	 */
-	String CRON_DISABLED = "-";
+	String CRON_DISABLED = ScheduledTaskRegistrar.CRON_DISABLED;
 
 
 	/**
@@ -82,7 +85,7 @@ public @interface Scheduled {
 	 * trigger, primarily meant for externally specified values resolved by a
 	 * <code>${...}</code> placeholder.
 	 * @return an expression that can be parsed to a cron schedule
-	 * @see org.springframework.scheduling.support.CronSequenceGenerator
+	 * @see org.springframework.scheduling.support.CronExpression#parse(String)
 	 */
 	String cron() default "";
 

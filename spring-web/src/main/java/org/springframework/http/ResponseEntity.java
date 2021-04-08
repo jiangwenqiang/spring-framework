@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2018 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
@@ -30,8 +31,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.ObjectUtils;
 
 /**
- * Extension of {@link HttpEntity} that adds a {@link HttpStatus} status code.
- * Used in {@code RestTemplate} as well {@code @Controller} methods.
+ * Extension of {@link HttpEntity} that adds an {@link HttpStatus} status code.
+ * Used in {@code RestTemplate} as well as in {@code @Controller} methods.
  *
  * <p>In {@code RestTemplate}, this class is returned by
  * {@link org.springframework.web.client.RestTemplate#getForEntity getForEntity()} and
@@ -43,7 +44,8 @@ import org.springframework.util.ObjectUtils;
  * HttpStatus statusCode = entity.getStatusCode();
  * </pre>
  *
- * <p>Can also be used in Spring MVC, as the return value from a @Controller method:
+ * <p>This can also be used in Spring MVC as the return value from an
+ * {@code @Controller} method:
  * <pre class="code">
  * &#64;RequestMapping("/handle")
  * public ResponseEntity&lt;String&gt; handle() {
@@ -69,6 +71,10 @@ import org.springframework.util.ObjectUtils;
  * @since 3.0.2
  * @param <T> the body type
  * @see #getStatusCode()
+ * @see org.springframework.web.client.RestOperations#getForEntity(String, Class, Object...)
+ * @see org.springframework.web.client.RestOperations#getForEntity(String, Class, java.util.Map)
+ * @see org.springframework.web.client.RestOperations#getForEntity(URI, Class)
+ * @see RequestEntity
  */
 public class ResponseEntity<T> extends HttpEntity<T> {
 
@@ -76,7 +82,7 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 
 
 	/**
-	 * Create a new {@code ResponseEntity} with the given status code, and no body nor headers.
+	 * Create a {@code ResponseEntity} with a status code only.
 	 * @param status the status code
 	 */
 	public ResponseEntity(HttpStatus status) {
@@ -84,7 +90,7 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	}
 
 	/**
-	 * Create a new {@code ResponseEntity} with the given body and status code, and no headers.
+	 * Create a {@code ResponseEntity} with a body and status code.
 	 * @param body the entity body
 	 * @param status the status code
 	 */
@@ -93,7 +99,7 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	}
 
 	/**
-	 * Create a new {@code HttpEntity} with the given headers and status code, and no body.
+	 * Create a {@code ResponseEntity} with headers and a status code.
 	 * @param headers the entity headers
 	 * @param status the status code
 	 */
@@ -102,23 +108,28 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	}
 
 	/**
-	 * Create a new {@code HttpEntity} with the given body, headers, and status code.
+	 * Create a {@code ResponseEntity} with a body, headers, and a status code.
 	 * @param body the entity body
 	 * @param headers the entity headers
 	 * @param status the status code
 	 */
 	public ResponseEntity(@Nullable T body, @Nullable MultiValueMap<String, String> headers, HttpStatus status) {
-		super(body, headers);
-		Assert.notNull(status, "HttpStatus must not be null");
-		this.status = status;
+		this(body, headers, (Object) status);
 	}
 
 	/**
-	 * Create a new {@code HttpEntity} with the given body, headers, and status code.
-	 * Just used behind the nested builder API.
+	 * Create a {@code ResponseEntity} with a body, headers, and a raw status code.
 	 * @param body the entity body
 	 * @param headers the entity headers
-	 * @param status the status code (as {@code HttpStatus} or as {@code Integer} value)
+	 * @param rawStatus the status code value
+	 * @since 5.3.2
+	 */
+	public ResponseEntity(@Nullable T body, @Nullable MultiValueMap<String, String> headers, int rawStatus) {
+		this(body, headers, (Object) rawStatus);
+	}
+
+	/**
+	 * Private constructor.
 	 */
 	private ResponseEntity(@Nullable T body, @Nullable MultiValueMap<String, String> headers, Object status) {
 		super(body, headers);
@@ -169,13 +180,13 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 
 	@Override
 	public int hashCode() {
-		return (super.hashCode() * 29 + ObjectUtils.nullSafeHashCode(this.status));
+		return (29 * super.hashCode() + ObjectUtils.nullSafeHashCode(this.status));
 	}
 
 	@Override
 	public String toString() {
 		StringBuilder builder = new StringBuilder("<");
-		builder.append(this.status.toString());
+		builder.append(this.status);
 		if (this.status instanceof HttpStatus) {
 			builder.append(' ');
 			builder.append(((HttpStatus) this.status).getReasonPhrase());
@@ -217,19 +228,6 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	}
 
 	/**
-	 * A shortcut for creating a {@code ResponseEntity} with the given body
-	 * and the {@linkplain HttpStatus#OK OK} status, or an empty body and a
-	 * {@linkplain HttpStatus#NOT_FOUND NOT FOUND} status in case of a
-	 * {@linkplain Optional#empty()} parameter.
-	 * @return the created {@code ResponseEntity}
-	 * @since 5.1
-	 */
-	public static <T> ResponseEntity<T> of(Optional<T> body) {
-		Assert.notNull(body, "Body must not be null");
-		return body.map(ResponseEntity::ok).orElse(notFound().build());
-	}
-
-	/**
 	 * Create a builder with the status set to {@linkplain HttpStatus#OK OK}.
 	 * @return the created builder
 	 * @since 4.1
@@ -239,14 +237,27 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	}
 
 	/**
-	 * A shortcut for creating a {@code ResponseEntity} with the given body and
-	 * the status set to {@linkplain HttpStatus#OK OK}.
+	 * A shortcut for creating a {@code ResponseEntity} with the given body
+	 * and the status set to {@linkplain HttpStatus#OK OK}.
+	 * @param body the body of the response entity (possibly empty)
 	 * @return the created {@code ResponseEntity}
 	 * @since 4.1
 	 */
-	public static <T> ResponseEntity<T> ok(T body) {
-		BodyBuilder builder = ok();
-		return builder.body(body);
+	public static <T> ResponseEntity<T> ok(@Nullable T body) {
+		return ok().body(body);
+	}
+
+	/**
+	 * A shortcut for creating a {@code ResponseEntity} with the given body
+	 * and the {@linkplain HttpStatus#OK OK} status, or an empty body and a
+	 * {@linkplain HttpStatus#NOT_FOUND NOT FOUND} status in case of an
+	 * {@linkplain Optional#empty()} parameter.
+	 * @return the created {@code ResponseEntity}
+	 * @since 5.1
+	 */
+	public static <T> ResponseEntity<T> of(Optional<T> body) {
+		Assert.notNull(body, "Body must not be null");
+		return body.map(ResponseEntity::ok).orElseGet(() -> notFound().build());
 	}
 
 	/**
@@ -257,8 +268,7 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 	 * @since 4.1
 	 */
 	public static BodyBuilder created(URI location) {
-		BodyBuilder builder = status(HttpStatus.CREATED);
-		return builder.location(location);
+		return status(HttpStatus.CREATED).location(location);
 	}
 
 	/**
@@ -332,6 +342,18 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 		 * @see HttpHeaders#add(String, String)
 		 */
 		B headers(@Nullable HttpHeaders headers);
+
+		/**
+		 * Manipulate this entity's headers with the given consumer. The
+		 * headers provided to the consumer are "live", so that the consumer can be used to
+		 * {@linkplain HttpHeaders#set(String, String) overwrite} existing header values,
+		 * {@linkplain HttpHeaders#remove(Object) remove} values, or use any of the other
+		 * {@link HttpHeaders} methods.
+		 * @param headersConsumer a function that consumes the {@code HttpHeaders}
+		 * @return this builder
+		 * @since 5.2
+		 */
+		B headers(Consumer<HttpHeaders> headersConsumer);
 
 		/**
 		 * Set the set of allowed {@link HttpMethod HTTP methods}, as specified
@@ -478,6 +500,12 @@ public class ResponseEntity<T> extends HttpEntity<T> {
 			if (headers != null) {
 				this.headers.putAll(headers);
 			}
+			return this;
+		}
+
+		@Override
+		public BodyBuilder headers(Consumer<HttpHeaders> headersConsumer) {
+			headersConsumer.accept(this.headers);
 			return this;
 		}
 

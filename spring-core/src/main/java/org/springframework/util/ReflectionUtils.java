@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,8 +90,9 @@ public abstract class ReflectionUtils {
 	// Exception handling
 
 	/**
-	 * Handle the given reflection exception. Should only be called if no
-	 * checked exception is expected to be thrown by the target method.
+	 * Handle the given reflection exception.
+	 * <p>Should only be called if no checked exception is expected to be thrown
+	 * by a target method, or if an error occurs while accessing a method or field.
 	 * <p>Throws the underlying RuntimeException or Error in case of an
 	 * InvocationTargetException with such a root cause. Throws an
 	 * IllegalStateException with an appropriate message or
@@ -103,7 +104,7 @@ public abstract class ReflectionUtils {
 			throw new IllegalStateException("Method not found: " + ex.getMessage());
 		}
 		if (ex instanceof IllegalAccessException) {
-			throw new IllegalStateException("Could not access method: " + ex.getMessage());
+			throw new IllegalStateException("Could not access method or field: " + ex.getMessage());
 		}
 		if (ex instanceof InvocationTargetException) {
 			handleInvocationTargetException((InvocationTargetException) ex);
@@ -234,18 +235,21 @@ public abstract class ReflectionUtils {
 		Assert.notNull(name, "Method name must not be null");
 		Class<?> searchType = clazz;
 		while (searchType != null) {
-			Method[] methods = searchType.isInterface() ?
-					searchType.getMethods() :
-					getDeclaredMethods(searchType, false);
+			Method[] methods = (searchType.isInterface() ? searchType.getMethods() :
+					getDeclaredMethods(searchType, false));
 			for (Method method : methods) {
-				if (name.equals(method.getName()) &&
-						(paramTypes == null || Arrays.equals(paramTypes, method.getParameterTypes()))) {
+				if (name.equals(method.getName()) && (paramTypes == null || hasSameParams(method, paramTypes))) {
 					return method;
 				}
 			}
 			searchType = searchType.getSuperclass();
 		}
 		return null;
+	}
+
+	private static boolean hasSameParams(Method method, Class<?>[] paramTypes) {
+		return (paramTypes.length == method.getParameterCount() &&
+				Arrays.equals(paramTypes, method.getParameterTypes()));
 	}
 
 	/**
@@ -380,7 +384,7 @@ public abstract class ReflectionUtils {
 	 * @throws IllegalStateException if introspection fails
 	 */
 	public static Method[] getAllDeclaredMethods(Class<?> leafClass) {
-		final List<Method> methods = new ArrayList<>(32);
+		final List<Method> methods = new ArrayList<>(20);
 		doWithMethods(leafClass, methods::add);
 		return methods.toArray(EMPTY_METHOD_ARRAY);
 	}
@@ -406,12 +410,13 @@ public abstract class ReflectionUtils {
 	 * @since 5.2
 	 */
 	public static Method[] getUniqueDeclaredMethods(Class<?> leafClass, @Nullable MethodFilter mf) {
-		final List<Method> methods = new ArrayList<>(32);
+		final List<Method> methods = new ArrayList<>(20);
 		doWithMethods(leafClass, method -> {
 			boolean knownSignature = false;
 			Method methodBeingOverriddenWithCovariantReturnType = null;
 			for (Method existingMethod : methods) {
 				if (method.getName().equals(existingMethod.getName()) &&
+						method.getParameterCount() == existingMethod.getParameterCount() &&
 						Arrays.equals(method.getParameterTypes(), existingMethod.getParameterTypes())) {
 					// Is this a covariant return type situation?
 					if (existingMethod.getReturnType() != method.getReturnType() &&
@@ -500,11 +505,16 @@ public abstract class ReflectionUtils {
 	 * @see java.lang.Object#equals(Object)
 	 */
 	public static boolean isEqualsMethod(@Nullable Method method) {
-		if (method == null || !method.getName().equals("equals")) {
+		if (method == null) {
 			return false;
 		}
-		Class<?>[] paramTypes = method.getParameterTypes();
-		return (paramTypes.length == 1 && paramTypes[0] == Object.class);
+		if (method.getParameterCount() != 1) {
+			return false;
+		}
+		if (!method.getName().equals("equals")) {
+			return false;
+		}
+		return method.getParameterTypes()[0] == Object.class;
 	}
 
 	/**
@@ -512,7 +522,7 @@ public abstract class ReflectionUtils {
 	 * @see java.lang.Object#hashCode()
 	 */
 	public static boolean isHashCodeMethod(@Nullable Method method) {
-		return (method != null && method.getName().equals("hashCode") && method.getParameterCount() == 0);
+		return method != null && method.getParameterCount() == 0 && method.getName().equals("hashCode");
 	}
 
 	/**
@@ -520,7 +530,7 @@ public abstract class ReflectionUtils {
 	 * @see java.lang.Object#toString()
 	 */
 	public static boolean isToStringMethod(@Nullable Method method) {
-		return (method != null && method.getName().equals("toString") && method.getParameterCount() == 0);
+		return (method != null && method.getParameterCount() == 0 && method.getName().equals("toString"));
 	}
 
 	/**
@@ -607,13 +617,15 @@ public abstract class ReflectionUtils {
 	}
 
 	/**
-	 * Set the field represented by the supplied {@link Field field object} on the
-	 * specified {@link Object target object} to the specified {@code value}.
-	 * In accordance with {@link Field#set(Object, Object)} semantics, the new value
+	 * Set the field represented by the supplied {@linkplain Field field object} on
+	 * the specified {@linkplain Object target object} to the specified {@code value}.
+	 * <p>In accordance with {@link Field#set(Object, Object)} semantics, the new value
 	 * is automatically unwrapped if the underlying field has a primitive type.
+	 * <p>This method does not support setting {@code static final} fields.
 	 * <p>Thrown exceptions are handled via a call to {@link #handleReflectionException(Exception)}.
 	 * @param field the field to set
 	 * @param target the target object on which to set the field
+	 * (or {@code null} for a static field)
 	 * @param value the value to set (may be {@code null})
 	 */
 	public static void setField(Field field, @Nullable Object target, @Nullable Object value) {
@@ -622,8 +634,6 @@ public abstract class ReflectionUtils {
 		}
 		catch (IllegalAccessException ex) {
 			handleReflectionException(ex);
-			throw new IllegalStateException(
-					"Unexpected reflection exception - " + ex.getClass().getName() + ": " + ex.getMessage());
 		}
 	}
 
@@ -635,6 +645,7 @@ public abstract class ReflectionUtils {
 	 * <p>Thrown exceptions are handled via a call to {@link #handleReflectionException(Exception)}.
 	 * @param field the field to get
 	 * @param target the target object from which to get the field
+	 * (or {@code null} for a static field)
 	 * @return the field's current value
 	 */
 	@Nullable
@@ -644,9 +655,8 @@ public abstract class ReflectionUtils {
 		}
 		catch (IllegalAccessException ex) {
 			handleReflectionException(ex);
-			throw new IllegalStateException(
-					"Unexpected reflection exception - " + ex.getClass().getName() + ": " + ex.getMessage());
 		}
+		throw new IllegalStateException("Should never get here");
 	}
 
 	/**
@@ -816,6 +826,19 @@ public abstract class ReflectionUtils {
 		 * @param method the method to check
 		 */
 		boolean matches(Method method);
+
+		/**
+		 * Create a composite filter based on this filter <em>and</em> the provided filter.
+		 * <p>If this filter does not match, the next filter will not be applied.
+		 * @param next the next {@code MethodFilter}
+		 * @return a composite {@code MethodFilter}
+		 * @throws IllegalArgumentException if the MethodFilter argument is {@code null}
+		 * @since 5.3.2
+		 */
+		default MethodFilter and(MethodFilter next) {
+			Assert.notNull(next, "Next MethodFilter must not be null");
+			return method -> matches(method) && next.matches(method);
+		}
 	}
 
 
@@ -844,6 +867,19 @@ public abstract class ReflectionUtils {
 		 * @param field the field to check
 		 */
 		boolean matches(Field field);
+
+		/**
+		 * Create a composite filter based on this filter <em>and</em> the provided filter.
+		 * <p>If this filter does not match, the next filter will not be applied.
+		 * @param next the next {@code FieldFilter}
+		 * @return a composite {@code FieldFilter}
+		 * @throws IllegalArgumentException if the FieldFilter argument is {@code null}
+		 * @since 5.3.2
+		 */
+		default FieldFilter and(FieldFilter next) {
+			Assert.notNull(next, "Next FieldFilter must not be null");
+			return field -> matches(field) && next.matches(field);
+		}
 	}
 
 }

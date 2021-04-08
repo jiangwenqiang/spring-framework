@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,15 @@
 package org.springframework.test.web.client;
 
 import java.net.SocketException;
+import java.time.Duration;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.test.web.client.MockRestServiceServer.MockRestServiceServerBuilder;
 import org.springframework.web.client.RestTemplate;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.ExpectedCount.once;
@@ -63,14 +65,15 @@ public class MockRestServiceServerTests {
 		server.verify();
 	}
 
-	@Test(expected = AssertionError.class)
+	@Test
 	public void exactExpectOrder() {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(this.restTemplate)
 				.ignoreExpectOrder(false).build();
 
 		server.expect(requestTo("/foo")).andRespond(withSuccess());
 		server.expect(requestTo("/bar")).andRespond(withSuccess());
-		this.restTemplate.getForObject("/bar", Void.class);
+		assertThatExceptionOfType(AssertionError.class).isThrownBy(() ->
+				this.restTemplate.getForObject("/bar", Void.class));
 	}
 
 	@Test
@@ -116,6 +119,24 @@ public class MockRestServiceServerTests {
 		server.verify();
 	}
 
+	@Test  // gh-24486
+	public void resetClearsRequestFailures() {
+		MockRestServiceServer server = MockRestServiceServer.bindTo(this.restTemplate).build();
+		server.expect(once(), requestTo("/remoteurl")).andRespond(withSuccess());
+		this.restTemplate.postForEntity("/remoteurl", null, String.class);
+		server.verify();
+
+		assertThatExceptionOfType(AssertionError.class)
+				.isThrownBy(() -> this.restTemplate.postForEntity("/remoteurl", null, String.class))
+				.withMessageStartingWith("No further requests expected");
+
+		server.reset();
+
+		server.expect(once(), requestTo("/remoteurl")).andRespond(withSuccess());
+		this.restTemplate.postForEntity("/remoteurl", null, String.class);
+		server.verify();
+	}
+
 	@Test  // SPR-16132
 	public void followUpRequestAfterFailure() {
 		MockRestServiceServer server = MockRestServiceServer.bindTo(this.restTemplate).build();
@@ -143,21 +164,36 @@ public class MockRestServiceServerTests {
 		server.expect(once(), requestTo("/remoteurl")).andRespond(withSuccess());
 
 		this.restTemplate.postForEntity("/remoteurl", null, String.class);
-		try {
-			this.restTemplate.postForEntity("/remoteurl", null, String.class);
-			fail("Expected assertion error");
-		}
-		catch (AssertionError error) {
-			assertThat(error.getMessage()).startsWith("No further requests expected");
-		}
+		assertThatExceptionOfType(AssertionError.class)
+				.isThrownBy(() -> this.restTemplate.postForEntity("/remoteurl", null, String.class))
+				.withMessageStartingWith("No further requests expected");
 
-		try {
-			server.verify();
-			fail("Expected verify failure");
-		}
-		catch (AssertionError error) {
-			assertThat(error.getMessage()).startsWith("Some requests did not execute successfully");
-		}
+		assertThatExceptionOfType(AssertionError.class)
+				.isThrownBy(server::verify)
+				.withMessageStartingWith("Some requests did not execute successfully");
+	}
+
+	@Test
+	public void verifyWithTimeout() {
+		MockRestServiceServerBuilder builder = MockRestServiceServer.bindTo(this.restTemplate);
+
+		MockRestServiceServer server1 = builder.build();
+		server1.expect(requestTo("/foo")).andRespond(withSuccess());
+		server1.expect(requestTo("/bar")).andRespond(withSuccess());
+		this.restTemplate.getForObject("/foo", Void.class);
+
+		assertThatThrownBy(() -> server1.verify(Duration.ofMillis(100))).hasMessage(
+				"Further request(s) expected leaving 1 unsatisfied expectation(s).\n" +
+						"1 request(s) executed:\n" +
+						"GET /foo, headers: [Accept:\"application/json, application/*+json\"]\n");
+
+		MockRestServiceServer server2 = builder.build();
+		server2.expect(requestTo("/foo")).andRespond(withSuccess());
+		server2.expect(requestTo("/bar")).andRespond(withSuccess());
+		this.restTemplate.getForObject("/foo", Void.class);
+		this.restTemplate.getForObject("/bar", Void.class);
+
+		server2.verify(Duration.ofMillis(100));
 	}
 
 }

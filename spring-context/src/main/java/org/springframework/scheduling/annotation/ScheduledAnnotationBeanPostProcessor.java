@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -256,7 +256,10 @@ public class ScheduledAnnotationBeanPostProcessor
 				this.registrar.setTaskScheduler(resolveSchedulerBean(this.beanFactory, TaskScheduler.class, false));
 			}
 			catch (NoUniqueBeanDefinitionException ex) {
-				logger.trace("Could not find unique TaskScheduler bean", ex);
+				if (logger.isTraceEnabled()) {
+					logger.trace("Could not find unique TaskScheduler bean - attempting to resolve by name: " +
+							ex.getMessage());
+				}
 				try {
 					this.registrar.setTaskScheduler(resolveSchedulerBean(this.beanFactory, TaskScheduler.class, true));
 				}
@@ -271,13 +274,19 @@ public class ScheduledAnnotationBeanPostProcessor
 				}
 			}
 			catch (NoSuchBeanDefinitionException ex) {
-				logger.trace("Could not find default TaskScheduler bean", ex);
+				if (logger.isTraceEnabled()) {
+					logger.trace("Could not find default TaskScheduler bean - attempting to find ScheduledExecutorService: " +
+							ex.getMessage());
+				}
 				// Search for ScheduledExecutorService bean next...
 				try {
 					this.registrar.setScheduler(resolveSchedulerBean(this.beanFactory, ScheduledExecutorService.class, false));
 				}
 				catch (NoUniqueBeanDefinitionException ex2) {
-					logger.trace("Could not find unique ScheduledExecutorService bean", ex2);
+					if (logger.isTraceEnabled()) {
+						logger.trace("Could not find unique ScheduledExecutorService bean - attempting to resolve by name: " +
+								ex2.getMessage());
+					}
 					try {
 						this.registrar.setScheduler(resolveSchedulerBean(this.beanFactory, ScheduledExecutorService.class, true));
 					}
@@ -292,7 +301,10 @@ public class ScheduledAnnotationBeanPostProcessor
 					}
 				}
 				catch (NoSuchBeanDefinitionException ex2) {
-					logger.trace("Could not find default ScheduledExecutorService bean", ex2);
+					if (logger.isTraceEnabled()) {
+						logger.trace("Could not find default ScheduledExecutorService bean - falling back to default: " +
+								ex2.getMessage());
+					}
 					// Giving up -> falling back to default scheduler within the registrar...
 					logger.info("No TaskScheduler/ScheduledExecutorService bean found for scheduled processing");
 				}
@@ -346,9 +358,9 @@ public class ScheduledAnnotationBeanPostProcessor
 				AnnotationUtils.isCandidateClass(targetClass, Arrays.asList(Scheduled.class, Schedules.class))) {
 			Map<Method, Set<Scheduled>> annotatedMethods = MethodIntrospector.selectMethods(targetClass,
 					(MethodIntrospector.MetadataLookup<Set<Scheduled>>) method -> {
-						Set<Scheduled> scheduledMethods = AnnotatedElementUtils.getMergedRepeatableAnnotations(
+						Set<Scheduled> scheduledAnnotations = AnnotatedElementUtils.getMergedRepeatableAnnotations(
 								method, Scheduled.class, Schedules.class);
-						return (!scheduledMethods.isEmpty() ? scheduledMethods : null);
+						return (!scheduledAnnotations.isEmpty() ? scheduledAnnotations : null);
 					});
 			if (annotatedMethods.isEmpty()) {
 				this.nonAnnotatedClasses.add(targetClass);
@@ -358,8 +370,8 @@ public class ScheduledAnnotationBeanPostProcessor
 			}
 			else {
 				// Non-empty set of methods
-				annotatedMethods.forEach((method, scheduledMethods) ->
-						scheduledMethods.forEach(scheduled -> processScheduled(scheduled, method, bean)));
+				annotatedMethods.forEach((method, scheduledAnnotations) ->
+						scheduledAnnotations.forEach(scheduled -> processScheduled(scheduled, method, bean)));
 				if (logger.isTraceEnabled()) {
 					logger.trace(annotatedMethods.size() + " @Scheduled methods processed on bean '" + beanName +
 							"': " + annotatedMethods);

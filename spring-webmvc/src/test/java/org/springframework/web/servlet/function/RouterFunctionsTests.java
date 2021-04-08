@@ -19,55 +19,52 @@ package org.springframework.web.servlet.function;
 import java.util.Collections;
 import java.util.Optional;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import org.springframework.mock.web.test.MockHttpServletRequest;
+import org.springframework.web.servlet.handler.PathPatternsTestUtils;
+import org.springframework.web.testfixture.servlet.MockHttpServletRequest;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
 /**
  * @author Arjen Poutsma
  */
-@SuppressWarnings("unchecked")
 public class RouterFunctionsTests {
+
+	private final ServerRequest request = new DefaultServerRequest(
+			PathPatternsTestUtils.initRequest("GET", "", true), Collections.emptyList());
+
 
 	@Test
 	public void routeMatch() {
 		HandlerFunction<ServerResponse> handlerFunction = request -> ServerResponse.ok().build();
 
-		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
-		ServerRequest request = new DefaultServerRequest(servletRequest, Collections.emptyList());
 		RequestPredicate requestPredicate = mock(RequestPredicate.class);
 		given(requestPredicate.test(request)).willReturn(true);
 
 		RouterFunction<ServerResponse>
 				result = RouterFunctions.route(requestPredicate, handlerFunction);
-		assertNotNull(result);
+		assertThat(result).isNotNull();
 
 		Optional<HandlerFunction<ServerResponse>> resultHandlerFunction = result.route(request);
-		assertTrue(resultHandlerFunction.isPresent());
-		assertEquals(handlerFunction, resultHandlerFunction.get());
+		assertThat(resultHandlerFunction.isPresent()).isTrue();
+		assertThat(resultHandlerFunction.get()).isEqualTo(handlerFunction);
 	}
 
 	@Test
 	public void routeNoMatch() {
 		HandlerFunction<ServerResponse> handlerFunction = request -> ServerResponse.ok().build();
 
-		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
-		ServerRequest request = new DefaultServerRequest(servletRequest, Collections.emptyList());
 		RequestPredicate requestPredicate = mock(RequestPredicate.class);
 		given(requestPredicate.test(request)).willReturn(false);
 
 		RouterFunction<ServerResponse> result = RouterFunctions.route(requestPredicate, handlerFunction);
-		assertNotNull(result);
+		assertThat(result).isNotNull();
 
 		Optional<HandlerFunction<ServerResponse>> resultHandlerFunction = result.route(request);
-		assertFalse(resultHandlerFunction.isPresent());
+		assertThat(resultHandlerFunction.isPresent()).isFalse();
 	}
 
 	@Test
@@ -75,17 +72,15 @@ public class RouterFunctionsTests {
 		HandlerFunction<ServerResponse> handlerFunction = request -> ServerResponse.ok().build();
 		RouterFunction<ServerResponse> routerFunction = request -> Optional.of(handlerFunction);
 
-		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
-		ServerRequest request = new DefaultServerRequest(servletRequest, Collections.emptyList());
 		RequestPredicate requestPredicate = mock(RequestPredicate.class);
 		given(requestPredicate.nest(request)).willReturn(Optional.of(request));
 
 		RouterFunction<ServerResponse> result = RouterFunctions.nest(requestPredicate, routerFunction);
-		assertNotNull(result);
+		assertThat(result).isNotNull();
 
 		Optional<HandlerFunction<ServerResponse>> resultHandlerFunction = result.route(request);
-		assertTrue(resultHandlerFunction.isPresent());
-		assertEquals(handlerFunction, resultHandlerFunction.get());
+		assertThat(resultHandlerFunction.isPresent()).isTrue();
+		assertThat(resultHandlerFunction.get()).isEqualTo(handlerFunction);
 	}
 
 	@Test
@@ -93,16 +88,30 @@ public class RouterFunctionsTests {
 		HandlerFunction<ServerResponse> handlerFunction = request -> ServerResponse.ok().build();
 		RouterFunction<ServerResponse> routerFunction = request -> Optional.of(handlerFunction);
 
-		MockHttpServletRequest servletRequest = new MockHttpServletRequest();
-		ServerRequest request = new DefaultServerRequest(servletRequest, Collections.emptyList());
 		RequestPredicate requestPredicate = mock(RequestPredicate.class);
 		given(requestPredicate.nest(request)).willReturn(Optional.empty());
 
 		RouterFunction<ServerResponse> result = RouterFunctions.nest(requestPredicate, routerFunction);
-		assertNotNull(result);
+		assertThat(result).isNotNull();
 
 		Optional<HandlerFunction<ServerResponse>> resultHandlerFunction = result.route(request);
-		assertFalse(resultHandlerFunction.isPresent());
+		assertThat(resultHandlerFunction.isPresent()).isFalse();
+	}
+
+	@Test
+	public void nestPathVariable() {
+		HandlerFunction<ServerResponse> handlerFunction = request -> ServerResponse.ok().build();
+		RequestPredicate requestPredicate = request -> request.pathVariable("foo").equals("bar");
+		RouterFunction<ServerResponse> nestedFunction = RouterFunctions.route(requestPredicate, handlerFunction);
+
+		RouterFunction<ServerResponse> result = RouterFunctions.nest(RequestPredicates.path("/{foo}"), nestedFunction);
+		assertThat(result).isNotNull();
+
+		MockHttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/bar");
+		ServerRequest request = new DefaultServerRequest(servletRequest, Collections.emptyList());
+		Optional<HandlerFunction<ServerResponse>> resultHandlerFunction = result.route(request);
+		assertThat(resultHandlerFunction.isPresent()).isTrue();
+		assertThat(resultHandlerFunction.get()).isEqualTo(handlerFunction);
 	}
 
 }

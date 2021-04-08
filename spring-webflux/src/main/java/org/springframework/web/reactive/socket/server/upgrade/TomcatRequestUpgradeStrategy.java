@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2018 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,9 @@
 
 package org.springframework.web.reactive.socket.server.upgrade;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.function.Supplier;
-import javax.servlet.ServletException;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.websocket.Endpoint;
@@ -29,14 +28,15 @@ import org.apache.tomcat.websocket.server.WsServerContainer;
 import reactor.core.publisher.Mono;
 
 import org.springframework.core.io.buffer.DataBufferFactory;
-import org.springframework.http.server.reactive.AbstractServerHttpRequest;
-import org.springframework.http.server.reactive.AbstractServerHttpResponse;
 import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.http.server.reactive.ServerHttpResponseDecorator;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.web.reactive.socket.HandshakeInfo;
 import org.springframework.web.reactive.socket.WebSocketHandler;
+import org.springframework.web.reactive.socket.adapter.ContextWebSocketHandler;
 import org.springframework.web.reactive.socket.adapter.StandardWebSocketHandlerAdapter;
 import org.springframework.web.reactive.socket.adapter.TomcatWebSocketSession;
 import org.springframework.web.reactive.socket.server.RequestUpgradeStrategy;
@@ -130,39 +130,33 @@ public class TomcatRequestUpgradeStrategy implements RequestUpgradeStrategy {
 		ServerHttpRequest request = exchange.getRequest();
 		ServerHttpResponse response = exchange.getResponse();
 
-		HttpServletRequest servletRequest = getHttpServletRequest(request);
-		HttpServletResponse servletResponse = getHttpServletResponse(response);
+		HttpServletRequest servletRequest = ServerHttpRequestDecorator.getNativeRequest(request);
+		HttpServletResponse servletResponse = ServerHttpResponseDecorator.getNativeResponse(response);
 
 		HandshakeInfo handshakeInfo = handshakeInfoFactory.get();
 		DataBufferFactory bufferFactory = response.bufferFactory();
 
-		Endpoint endpoint = new StandardWebSocketHandlerAdapter(
-				handler, session -> new TomcatWebSocketSession(session, handshakeInfo, bufferFactory));
+		// Trigger WebFlux preCommit actions and upgrade
+		return exchange.getResponse().setComplete()
+				.then(Mono.deferContextual(contextView -> {
+					Endpoint endpoint = new StandardWebSocketHandlerAdapter(
+							ContextWebSocketHandler.decorate(handler, contextView),
+							session -> new TomcatWebSocketSession(session, handshakeInfo, bufferFactory));
 
-		String requestURI = servletRequest.getRequestURI();
-		DefaultServerEndpointConfig config = new DefaultServerEndpointConfig(requestURI, endpoint);
-		config.setSubprotocols(subProtocol != null ?
-				Collections.singletonList(subProtocol) : Collections.emptyList());
+					String requestURI = servletRequest.getRequestURI();
+					DefaultServerEndpointConfig config = new DefaultServerEndpointConfig(requestURI, endpoint);
+					config.setSubprotocols(subProtocol != null ?
+							Collections.singletonList(subProtocol) : Collections.emptyList());
 
-		try {
-			WsServerContainer container = getContainer(servletRequest);
-			container.doUpgrade(servletRequest, servletResponse, config, Collections.emptyMap());
-		}
-		catch (ServletException | IOException ex) {
-			return Mono.error(ex);
-		}
-
-		return Mono.empty();
-	}
-
-	private HttpServletRequest getHttpServletRequest(ServerHttpRequest request) {
-		Assert.isInstanceOf(AbstractServerHttpRequest.class, request, "ServletServerHttpRequest required");
-		return ((AbstractServerHttpRequest) request).getNativeRequest();
-	}
-
-	private HttpServletResponse getHttpServletResponse(ServerHttpResponse response) {
-		Assert.isInstanceOf(AbstractServerHttpResponse.class, response, "ServletServerHttpResponse required");
-		return ((AbstractServerHttpResponse) response).getNativeResponse();
+					WsServerContainer container = getContainer(servletRequest);
+					try {
+						container.doUpgrade(servletRequest, servletResponse, config, Collections.emptyMap());
+					}
+					catch (Exception ex) {
+						return Mono.error(ex);
+					}
+					return Mono.empty();
+				}));
 	}
 
 	private WsServerContainer getContainer(HttpServletRequest request) {

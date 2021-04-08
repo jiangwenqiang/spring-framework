@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 
 	/**
 	 * Dedicated log category for disconnected client exceptions.
-	 * <p>Servlet containers dn't expose a a client disconnected callback, see
+	 * <p>Servlet containers don't expose a client disconnected callback; see
 	 * <a href="https://github.com/eclipse-ee4j/servlet-api/issues/44">eclipse-ee4j/servlet-api#44</a>.
 	 * <p>To avoid filling logs with unnecessary stack traces, we make an
 	 * effort to identify such network failures on a per-server basis, and then
@@ -81,7 +81,8 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 
 	private WebSessionManager sessionManager = new DefaultWebSessionManager();
 
-	private ServerCodecConfigurer codecConfigurer = ServerCodecConfigurer.create();
+	@Nullable
+	private ServerCodecConfigurer codecConfigurer;
 
 	private LocaleContextResolver localeContextResolver = new AcceptHeaderLocaleContextResolver();
 
@@ -143,6 +144,9 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 	 * Return the configured {@link ServerCodecConfigurer}.
 	 */
 	public ServerCodecConfigurer getCodecConfigurer() {
+		if (this.codecConfigurer == null) {
+			setCodecConfigurer(ServerCodecConfigurer.create());
+		}
 		return this.codecConfigurer;
 	}
 
@@ -224,7 +228,16 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 	@Override
 	public Mono<Void> handle(ServerHttpRequest request, ServerHttpResponse response) {
 		if (this.forwardedHeaderTransformer != null) {
-			request = this.forwardedHeaderTransformer.apply(request);
+			try {
+				request = this.forwardedHeaderTransformer.apply(request);
+			}
+			catch (Throwable ex) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Failed to apply forwarded headers to " + formatRequest(request), ex);
+				}
+				response.setStatusCode(HttpStatus.BAD_REQUEST);
+				return response.setComplete();
+			}
 		}
 		ServerWebExchange exchange = createExchange(request, response);
 
@@ -243,7 +256,13 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 				getCodecConfigurer(), getLocaleContextResolver(), this.applicationContext);
 	}
 
-	private String formatRequest(ServerHttpRequest request) {
+	/**
+	 * Format the request for logging purposes including HTTP method and URL.
+	 * <p>By default this prints the HTTP method, the URL path, and the query.
+	 * @param request the request to format
+	 * @return the String to display, never empty or {@code null}
+	 */
+	protected String formatRequest(ServerHttpRequest request) {
 		String rawQuery = request.getURI().getRawQuery();
 		String query = StringUtils.hasText(rawQuery) ? "?" + rawQuery : "";
 		return "HTTP " + request.getMethod() + " \"" + request.getPath() + query + "\"";
@@ -267,7 +286,14 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 		ServerHttpResponse response = exchange.getResponse();
 		String logPrefix = exchange.getLogPrefix();
 
-		if (isDisconnectedClientError(ex)) {
+		// Sometimes a remote call error can look like a disconnected client.
+		// Try to set the response first before the "isDisconnectedClient" check.
+
+		if (response.setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR)) {
+			logger.error(logPrefix + "500 Server Error for " + formatRequest(request), ex);
+			return Mono.empty();
+		}
+		else if (isDisconnectedClientError(ex)) {
 			if (lostClientLogger.isTraceEnabled()) {
 				lostClientLogger.trace(logPrefix + "Client went away", ex);
 			}
@@ -275,10 +301,6 @@ public class HttpWebHandlerAdapter extends WebHandlerDecorator implements HttpHa
 				lostClientLogger.debug(logPrefix + "Client went away: " + ex +
 						" (stacktrace at TRACE level for '" + DISCONNECTED_CLIENT_LOG_CATEGORY + "')");
 			}
-			return Mono.empty();
-		}
-		else if (response.setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR)) {
-			logger.error(logPrefix + "500 Server Error for " + formatRequest(request), ex);
 			return Mono.empty();
 		}
 		else {

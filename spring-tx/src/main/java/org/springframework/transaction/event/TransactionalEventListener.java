@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,18 +27,28 @@ import org.springframework.core.annotation.AliasFor;
 
 /**
  * An {@link EventListener} that is invoked according to a {@link TransactionPhase}.
+ * This is an an annotation-based equivalent of {@link TransactionalApplicationListener}.
  *
- * <p>If the event is not published within the boundaries of a managed transaction, the
- * event is discarded unless the {@link #fallbackExecution} flag is explicitly set. If a
- * transaction is running, the event is processed according to its {@code TransactionPhase}.
+ * <p>If the event is not published within an active transaction, the event is discarded
+ * unless the {@link #fallbackExecution} flag is explicitly set. If a transaction is
+ * running, the event is processed according to its {@code TransactionPhase}.
  *
  * <p>Adding {@link org.springframework.core.annotation.Order @Order} to your annotated
  * method allows you to prioritize that listener amongst other listeners running before
  * or after transaction completion.
  *
+ * <p><b>NOTE: Transactional event listeners only work with thread-bound transactions
+ * managed by {@link org.springframework.transaction.PlatformTransactionManager}.</b>
+ * A reactive transaction managed by {@link org.springframework.transaction.ReactiveTransactionManager}
+ * uses the Reactor context instead of thread-local attributes, so from the perspective of
+ * an event listener, there is no compatible active transaction that it can participate in.
+ *
  * @author Stephane Nicoll
  * @author Sam Brannen
+ * @author Oliver Drotbohm
  * @since 4.2
+ * @see TransactionalApplicationListener
+ * @see TransactionalApplicationListenerMethodAdapter
  */
 @Target({ElementType.METHOD, ElementType.ANNOTATION_TYPE})
 @Retention(RetentionPolicy.RUNTIME)
@@ -81,6 +91,17 @@ public @interface TransactionalEventListener {
 	 * <p>The default is {@code ""}, meaning the event is always handled.
 	 * @see EventListener#condition
 	 */
+	@AliasFor(annotation = EventListener.class, attribute = "condition")
 	String condition() default "";
+
+	/**
+	 * An optional identifier for the listener, defaulting to the fully-qualified
+	 * signature of the declaring method (e.g. "mypackage.MyClass.myMethod()").
+	 * @since 5.3
+	 * @see EventListener#id
+	 * @see TransactionalApplicationListener#getListenerId()
+	 */
+	@AliasFor(annotation = EventListener.class, attribute = "id")
+	String id() default "";
 
 }

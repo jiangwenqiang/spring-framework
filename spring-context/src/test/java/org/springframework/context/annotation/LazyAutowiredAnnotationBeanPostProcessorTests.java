@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,21 +20,20 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.beans.factory.support.RootBeanDefinition;
-import org.springframework.tests.sample.beans.TestBean;
+import org.springframework.beans.testfixture.beans.TestBean;
+import org.springframework.util.ObjectUtils;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * @author Juergen Hoeller
@@ -45,21 +44,25 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 	private void doTestLazyResourceInjection(Class<? extends TestBeanHolder> annotatedBeanClass) {
 		AnnotationConfigApplicationContext ac = new AnnotationConfigApplicationContext();
 		RootBeanDefinition abd = new RootBeanDefinition(annotatedBeanClass);
-		abd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
+		abd.setScope(BeanDefinition.SCOPE_PROTOTYPE);
 		ac.registerBeanDefinition("annotatedBean", abd);
 		RootBeanDefinition tbd = new RootBeanDefinition(TestBean.class);
 		tbd.setLazyInit(true);
 		ac.registerBeanDefinition("testBean", tbd);
 		ac.refresh();
 
+		ConfigurableListableBeanFactory bf = ac.getBeanFactory();
 		TestBeanHolder bean = ac.getBean("annotatedBean", TestBeanHolder.class);
-		assertFalse(ac.getBeanFactory().containsSingleton("testBean"));
-		assertNotNull(bean.getTestBean());
-		assertNull(bean.getTestBean().getName());
-		assertTrue(ac.getBeanFactory().containsSingleton("testBean"));
+		assertThat(bf.containsSingleton("testBean")).isFalse();
+		assertThat(bean.getTestBean()).isNotNull();
+		assertThat(bean.getTestBean().getName()).isNull();
+		assertThat(bf.containsSingleton("testBean")).isTrue();
 		TestBean tb = (TestBean) ac.getBean("testBean");
 		tb.setName("tb");
-		assertSame("tb", bean.getTestBean().getName());
+		assertThat(bean.getTestBean().getName()).isSameAs("tb");
+
+		assertThat(ObjectUtils.containsElement(bf.getDependenciesForBean("annotatedBean"), "testBean")).isTrue();
+		assertThat(ObjectUtils.containsElement(bf.getDependentBeans("testBean"), "annotatedBean")).isTrue();
 	}
 
 	@Test
@@ -68,7 +71,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 
 		AnnotationConfigApplicationContext ac = new AnnotationConfigApplicationContext();
 		RootBeanDefinition abd = new RootBeanDefinition(FieldResourceInjectionBean.class);
-		abd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
+		abd.setScope(BeanDefinition.SCOPE_PROTOTYPE);
 		ac.registerBeanDefinition("annotatedBean", abd);
 		RootBeanDefinition tbd = new RootBeanDefinition(TestBean.class);
 		tbd.setLazyInit(true);
@@ -76,13 +79,13 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		ac.refresh();
 
 		FieldResourceInjectionBean bean = ac.getBean("annotatedBean", FieldResourceInjectionBean.class);
-		assertFalse(ac.getBeanFactory().containsSingleton("testBean"));
-		assertFalse(bean.getTestBeans().isEmpty());
-		assertNull(bean.getTestBeans().get(0).getName());
-		assertTrue(ac.getBeanFactory().containsSingleton("testBean"));
+		assertThat(ac.getBeanFactory().containsSingleton("testBean")).isFalse();
+		assertThat(bean.getTestBeans().isEmpty()).isFalse();
+		assertThat(bean.getTestBeans().get(0).getName()).isNull();
+		assertThat(ac.getBeanFactory().containsSingleton("testBean")).isTrue();
 		TestBean tb = (TestBean) ac.getBean("testBean");
 		tb.setName("tb");
-		assertSame("tb", bean.getTestBean().getName());
+		assertThat(bean.getTestBean().getName()).isSameAs("tb");
 	}
 
 	@Test
@@ -128,18 +131,13 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		bpp.setBeanFactory(bf);
 		bf.addBeanPostProcessor(bpp);
 		RootBeanDefinition bd = new RootBeanDefinition(FieldResourceInjectionBean.class);
-		bd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
+		bd.setScope(BeanDefinition.SCOPE_PROTOTYPE);
 		bf.registerBeanDefinition("annotatedBean", bd);
 
 		FieldResourceInjectionBean bean = (FieldResourceInjectionBean) bf.getBean("annotatedBean");
-		assertNotNull(bean.getTestBean());
-		try {
-			bean.getTestBean().getName();
-			fail("Should have thrown NoSuchBeanDefinitionException");
-		}
-		catch (NoSuchBeanDefinitionException ex) {
-			// expected
-		}
+		assertThat(bean.getTestBean()).isNotNull();
+		assertThatExceptionOfType(NoSuchBeanDefinitionException.class).isThrownBy(() ->
+				bean.getTestBean().getName());
 	}
 
 	@Test
@@ -150,20 +148,15 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		bpp.setBeanFactory(bf);
 		bf.addBeanPostProcessor(bpp);
 		RootBeanDefinition bd = new RootBeanDefinition(OptionalFieldResourceInjectionBean.class);
-		bd.setScope(RootBeanDefinition.SCOPE_PROTOTYPE);
+		bd.setScope(BeanDefinition.SCOPE_PROTOTYPE);
 		bf.registerBeanDefinition("annotatedBean", bd);
 
 		OptionalFieldResourceInjectionBean bean = (OptionalFieldResourceInjectionBean) bf.getBean("annotatedBean");
-		assertNotNull(bean.getTestBean());
-		assertNotNull(bean.getTestBeans());
-		assertTrue(bean.getTestBeans().isEmpty());
-		try {
-			bean.getTestBean().getName();
-			fail("Should have thrown NoSuchBeanDefinitionException");
-		}
-		catch (NoSuchBeanDefinitionException ex) {
-			// expected
-		}
+		assertThat(bean.getTestBean()).isNotNull();
+		assertThat(bean.getTestBeans()).isNotNull();
+		assertThat(bean.getTestBeans().isEmpty()).isTrue();
+		assertThatExceptionOfType(NoSuchBeanDefinitionException.class).isThrownBy(() ->
+				bean.getTestBean().getName());
 	}
 
 
@@ -181,6 +174,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		@Autowired @Lazy
 		private List<TestBean> testBeans;
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -199,6 +193,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		@Autowired(required = false) @Lazy
 		private List<TestBean> testBeans;
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -214,6 +209,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 		@LazyInject
 		private TestBean testBean;
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -232,6 +228,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -250,6 +247,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -268,6 +266,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -283,6 +282,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -298,6 +298,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}
@@ -313,6 +314,7 @@ public class LazyAutowiredAnnotationBeanPostProcessorTests {
 			this.testBean = testBean;
 		}
 
+		@Override
 		public TestBean getTestBean() {
 			return this.testBean;
 		}

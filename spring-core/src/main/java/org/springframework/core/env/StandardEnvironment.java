@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2018 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,22 @@ public class StandardEnvironment extends AbstractEnvironment {
 
 
 	/**
+	 * Create a new {@code StandardEnvironment} instance.
+	 */
+	public StandardEnvironment() {
+	}
+
+	/**
+	 * Create a new {@code StandardEnvironment} instance with a specific {@link MutablePropertySources} instance.
+	 * @param propertySources property sources to use
+	 * @since 5.3.4
+	 */
+	protected StandardEnvironment(MutablePropertySources propertySources) {
+		super(propertySources);
+	}
+
+
+	/**
 	 * Customize the set of property sources with those appropriate for any standard
 	 * Java environment:
 	 * <ul>
@@ -75,8 +91,10 @@ public class StandardEnvironment extends AbstractEnvironment {
 	 */
 	@Override
 	protected void customizePropertySources(MutablePropertySources propertySources) {
-		propertySources.addLast(new MapPropertySource(SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, getSystemProperties()));
-		propertySources.addLast(new SystemEnvironmentPropertySource(SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, getSystemEnvironment()));
+		propertySources.addLast(
+				new PropertiesPropertySource(SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, getSystemProperties()));
+		propertySources.addLast(
+				new SystemEnvironmentPropertySource(SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, getSystemEnvironment()));
 	}
 
 }

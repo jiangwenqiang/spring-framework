@@ -20,9 +20,10 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+
 import javax.persistence.PersistenceException;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.dao.DataAccessException;
@@ -31,8 +32,7 @@ import org.springframework.dao.support.DataAccessUtilsTests.MapPersistenceExcept
 import org.springframework.dao.support.PersistenceExceptionTranslator;
 import org.springframework.stereotype.Repository;
 
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * Tests for PersistenceExceptionTranslationAdvisor's exception translation, as applied by
@@ -69,20 +69,12 @@ public class PersistenceExceptionTranslationAdvisorTests {
 		ri.throwsPersistenceException();
 
 		target.setBehavior(persistenceException1);
-		try {
-			ri.noThrowsClause();
-			fail();
-		}
-		catch (RuntimeException ex) {
-			assertSame(persistenceException1, ex);
-		}
-		try {
-			ri.throwsPersistenceException();
-			fail();
-		}
-		catch (RuntimeException ex) {
-			assertSame(persistenceException1, ex);
-		}
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(
+				ri::noThrowsClause)
+			.isSameAs(persistenceException1);
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(
+				ri::throwsPersistenceException)
+			.isSameAs(persistenceException1);
 	}
 
 	@Test
@@ -94,20 +86,12 @@ public class PersistenceExceptionTranslationAdvisorTests {
 		ri.throwsPersistenceException();
 
 		target.setBehavior(doNotTranslate);
-		try {
-			ri.noThrowsClause();
-			fail();
-		}
-		catch (RuntimeException ex) {
-			assertSame(doNotTranslate, ex);
-		}
-		try {
-			ri.throwsPersistenceException();
-			fail();
-		}
-		catch (RuntimeException ex) {
-			assertSame(doNotTranslate, ex);
-		}
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(
+				ri::noThrowsClause)
+			.isSameAs(doNotTranslate);
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(
+				ri::throwsPersistenceException)
+			.isSameAs(doNotTranslate);
 	}
 
 	@Test
@@ -139,25 +123,13 @@ public class PersistenceExceptionTranslationAdvisorTests {
 		RepositoryInterface ri = createProxy(target);
 
 		target.setBehavior(persistenceException1);
-		try {
-			ri.noThrowsClause();
-			fail();
-		}
-		catch (DataAccessException ex) {
-			// Expected
-			assertSame(persistenceException1, ex.getCause());
-		}
-		catch (PersistenceException ex) {
-			fail("Should have been translated");
-		}
+		assertThatExceptionOfType(DataAccessException.class).isThrownBy(
+				ri::noThrowsClause)
+			.withCause(persistenceException1);
 
-		try {
-			ri.throwsPersistenceException();
-			fail();
-		}
-		catch (PersistenceException ex) {
-			assertSame(persistenceException1, ex);
-		}
+		assertThatExceptionOfType(PersistenceException.class).isThrownBy(
+				ri::throwsPersistenceException)
+			.isSameAs(persistenceException1);
 	}
 
 

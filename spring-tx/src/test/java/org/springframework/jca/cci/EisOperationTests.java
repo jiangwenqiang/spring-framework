@@ -24,13 +24,13 @@ import javax.resource.cci.InteractionSpec;
 import javax.resource.cci.Record;
 import javax.resource.cci.RecordFactory;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.jca.cci.core.RecordCreator;
 import org.springframework.jca.cci.object.MappingRecordOperation;
 import org.springframework.jca.cci.object.SimpleRecordOperation;
 
-import static org.junit.Assert.assertSame;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -39,6 +39,7 @@ import static org.mockito.Mockito.verify;
  * @author Thierry Templier
  * @author Chris Beams
  */
+@Deprecated
 public class EisOperationTests {
 
 	@Test
@@ -139,7 +140,7 @@ public class EisOperationTests {
 		given(interaction.execute(interactionSpec, inputRecord)).willReturn(outputRecord);
 		given(callDetector.callExtractOutputData(outputRecord)).willReturn(outObj);
 
-		assertSame(outObj, query.execute(inObj));
+		assertThat(query.execute(inObj)).isSameAs(outObj);
 		verify(interaction).close();
 		verify(connection).close();
 	}
@@ -176,7 +177,7 @@ public class EisOperationTests {
 		given(interaction.execute(interactionSpec, inputRecord, outputRecord)).willReturn(true);
 		given(callDetector.callExtractOutputData(outputRecord)).willReturn(outObj);
 
-		assertSame(outObj, query.execute(inObj));
+		assertThat(query.execute(inObj)).isSameAs(outObj);
 		verify(interaction).close();
 		verify(connection).close();
 	}

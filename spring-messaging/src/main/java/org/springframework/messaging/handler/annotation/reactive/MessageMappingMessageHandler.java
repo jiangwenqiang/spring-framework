@@ -44,6 +44,7 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.CompositeMessageCondition;
 import org.springframework.messaging.handler.DestinationPatternsMessageCondition;
 import org.springframework.messaging.handler.HandlerMethod;
+import org.springframework.messaging.handler.MessagingAdviceBean;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.support.AnnotationExceptionHandlerMethodResolver;
 import org.springframework.messaging.handler.invocation.AbstractExceptionHandlerMethodResolver;
@@ -83,15 +84,12 @@ import org.springframework.validation.Validator;
 public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<CompositeMessageCondition>
 		implements EmbeddedValueResolverAware {
 
-	@Nullable
-	private Predicate<Class<?>> handlerPredicate =
-			beanType -> AnnotatedElementUtils.hasAnnotation(beanType, Controller.class);
-
 	private final List<Decoder<?>> decoders = new ArrayList<>();
 
 	@Nullable
 	private Validator validator;
 
+	@Nullable
 	private RouteMatcher routeMatcher;
 
 	private ConversionService conversionService = new DefaultFormattingConversionService();
@@ -101,66 +99,15 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 
 
 	public MessageMappingMessageHandler() {
-		AntPathMatcher pathMatcher = new AntPathMatcher();
-		pathMatcher.setPathSeparator(".");
-		this.routeMatcher = new SimpleRouteMatcher(pathMatcher);
+		setHandlerPredicate(type -> AnnotatedElementUtils.hasAnnotation(type, Controller.class));
 	}
 
-
-	/**
-	 * Manually configure handlers to check for {@code @MessageMapping} methods.
-	 * <p><strong>Note:</strong> the given handlers are not required to be
-	 * annotated with {@code @Controller}. Consider also using
-	 * {@link #setAutoDetectDisabled()} if the intent is to use these handlers
-	 * instead of, and not in addition to {@code @Controller} classes. Or
-	 * alternatively use {@link #setHandlerPredicate(Predicate)} to select a
-	 * different set of beans based on a different criteria.
-	 * @param handlers the handlers to register
-	 * @see #setAutoDetectDisabled()
-	 * @see #setHandlerPredicate(Predicate)
-	 */
-	public void setHandlers(List<Object> handlers) {
-		for (Object handler : handlers) {
-			detectHandlerMethods(handler);
-		}
-		// Disable auto-detection..
-		this.handlerPredicate = null;
-	}
-
-	/**
-	 * Configure the predicate to use for selecting which Spring beans to check
-	 * for {@code @MessageMapping} methods. When set to {@code null},
-	 * auto-detection is turned off which is what
-	 * {@link #setAutoDetectDisabled()} does internally.
-	 * <p>The predicate used by default selects {@code @Controller} classes.
-	 * @see #setHandlers(List)
-	 * @see #setAutoDetectDisabled()
-	 */
-	public void setHandlerPredicate(@Nullable Predicate<Class<?>> handlerPredicate) {
-		this.handlerPredicate = handlerPredicate;
-	}
-
-	/**
-	 * Return the {@link #setHandlerPredicate configured} handler predicate.
-	 */
-	@Nullable
-	public Predicate<Class<?>> getHandlerPredicate() {
-		return this.handlerPredicate;
-	}
-
-	/**
-	 * Disable auto-detection of {@code @MessageMapping} methods, e.g. in
-	 * {@code @Controller}s, by setting {@link #setHandlerPredicate(Predicate)
-	 * setHandlerPredicate(null)}.
-	 */
-	public void setAutoDetectDisabled() {
-		this.handlerPredicate = null;
-	}
 
 	/**
 	 * Configure the decoders to use for incoming payloads.
 	 */
 	public void setDecoders(List<? extends Decoder<?>> decoders) {
+		this.decoders.clear();
 		this.decoders.addAll(decoders);
 	}
 
@@ -196,16 +143,29 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 	 * efficiency consider using the {@code PathPatternRouteMatcher} from
 	 * {@code spring-web} instead.
 	 */
-	public void setRouteMatcher(RouteMatcher routeMatcher) {
-		Assert.notNull(routeMatcher, "RouteMatcher must not be null");
+	public void setRouteMatcher(@Nullable RouteMatcher routeMatcher) {
 		this.routeMatcher = routeMatcher;
 	}
 
 	/**
 	 * Return the {@code RouteMatcher} used to map messages to handlers.
+	 * May be {@code null} before the component is initialized.
 	 */
+	@Nullable
 	public RouteMatcher getRouteMatcher() {
 		return this.routeMatcher;
+	}
+
+	/**
+	 * Obtain the {@code RouteMatcher} for actual use.
+	 * @return the RouteMatcher (never {@code null})
+	 * @throws IllegalStateException in case of no RouteMatcher set
+	 * @since 5.0
+	 */
+	protected RouteMatcher obtainRouteMatcher() {
+		RouteMatcher routeMatcher = getRouteMatcher();
+		Assert.state(routeMatcher != null, "No RouteMatcher set");
+		return routeMatcher;
 	}
 
 	/**
@@ -230,6 +190,53 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 		this.valueResolver = resolver;
 	}
 
+	/**
+	 * Use this method to register a {@link MessagingAdviceBean} that may contain
+	 * globally applicable
+	 * {@link org.springframework.messaging.handler.annotation.MessageExceptionHandler @MessageExceptionHandler}
+	 * methods.
+	 * <p>Note: spring-messaging does not depend on spring-web and therefore it
+	 * is not possible to explicitly support the registration of a
+	 * {@code @ControllerAdvice} bean. You can use the following adapter code
+	 * to register {@code @ControllerAdvice} beans here:
+	 * <pre>
+	 * ControllerAdviceBean.findAnnotatedBeans(context).forEach(bean ->
+	 *         messageHandler.registerMessagingAdvice(new ControllerAdviceWrapper(bean));
+	 *
+	 * public class ControllerAdviceWrapper implements MessagingAdviceBean {
+	 *     private final ControllerAdviceBean delegate;
+	 *     // delegate all methods
+	 * }
+	 * </pre>
+	 *
+	 * @param bean the bean to check for {@code @MessageExceptionHandler} methods
+	 * @since 5.3.5
+	 */
+	public void registerMessagingAdvice(MessagingAdviceBean bean) {
+		Class<?> type = bean.getBeanType();
+		if (type != null) {
+			AnnotationExceptionHandlerMethodResolver resolver = new AnnotationExceptionHandlerMethodResolver(type);
+			if (resolver.hasExceptionMappings()) {
+				registerExceptionHandlerAdvice(bean, resolver);
+				if (logger.isTraceEnabled()) {
+					logger.trace("Detected @MessageExceptionHandler methods in " + bean);
+				}
+			}
+		}
+	}
+
+	@Override
+	public void afterPropertiesSet() {
+
+		// Initialize RouteMatcher before parent initializes handler mappings
+		if (this.routeMatcher == null) {
+			AntPathMatcher pathMatcher = new AntPathMatcher();
+			pathMatcher.setPathSeparator(".");
+			this.routeMatcher = new SimpleRouteMatcher(pathMatcher);
+		}
+
+		super.afterPropertiesSet();
+	}
 
 	@Override
 	protected List<? extends HandlerMethodArgumentResolver> initArgumentResolvers() {
@@ -254,7 +261,7 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 
 		// Catch-all
 		resolvers.add(new PayloadMethodArgumentResolver(
-				this.decoders, this.validator, getReactiveAdapterRegistry(), true));
+				getDecoders(), this.validator, getReactiveAdapterRegistry(), true));
 
 		return resolvers;
 	}
@@ -262,11 +269,6 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 	@Override
 	protected List<? extends HandlerMethodReturnValueHandler> initReturnValueHandlers() {
 		return Collections.emptyList();
-	}
-
-	@Override
-	protected Predicate<Class<?>> initHandlerPredicate() {
-		return this.handlerPredicate;
 	}
 
 
@@ -282,27 +284,41 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 		return methodCondition;
 	}
 
+	/**
+	 * Determine the mapping condition for the given annotated element.
+	 * @param element the element to check
+	 * @return the condition, or {@code null}
+	 */
 	@Nullable
-	private CompositeMessageCondition getCondition(AnnotatedElement element) {
-		MessageMapping annot = AnnotatedElementUtils.findMergedAnnotation(element, MessageMapping.class);
-		if (annot == null || annot.value().length == 0) {
+	protected CompositeMessageCondition getCondition(AnnotatedElement element) {
+		MessageMapping ann = AnnotatedElementUtils.findMergedAnnotation(element, MessageMapping.class);
+		if (ann == null || ann.value().length == 0) {
 			return null;
 		}
-		String[] destinations = annot.value();
+		String[] patterns = processDestinations(ann.value());
+		return new CompositeMessageCondition(
+				new DestinationPatternsMessageCondition(patterns, obtainRouteMatcher()));
+	}
+
+	/**
+	 * Resolve placeholders in the given destinations.
+	 * @param destinations the destinations
+	 * @return new array with the processed destinations or the same array
+	 */
+	protected String[] processDestinations(String[] destinations) {
 		if (this.valueResolver != null) {
-			destinations = Arrays.stream(annot.value())
+			destinations = Arrays.stream(destinations)
 					.map(s -> this.valueResolver.resolveStringValue(s))
 					.toArray(String[]::new);
 		}
-		return new CompositeMessageCondition(
-				new DestinationPatternsMessageCondition(destinations, this.routeMatcher));
+		return destinations;
 	}
 
 	@Override
 	protected Set<String> getDirectLookupMappings(CompositeMessageCondition mapping) {
 		Set<String> result = new LinkedHashSet<>();
 		for (String pattern : mapping.getCondition(DestinationPatternsMessageCondition.class).getPatterns()) {
-			if (!this.routeMatcher.isPattern(pattern)) {
+			if (!obtainRouteMatcher().isPattern(pattern)) {
 				result.add(pattern);
 			}
 		}
@@ -339,7 +355,7 @@ public class MessageMappingMessageHandler extends AbstractMethodMessageHandler<C
 			String pattern = patterns.iterator().next();
 			RouteMatcher.Route destination = getDestination(message);
 			Assert.state(destination != null, "Missing destination header");
-			Map<String, String> vars = getRouteMatcher().matchAndExtract(pattern, destination);
+			Map<String, String> vars = obtainRouteMatcher().matchAndExtract(pattern, destination);
 			if (!CollectionUtils.isEmpty(vars)) {
 				MessageHeaderAccessor mha = MessageHeaderAccessor.getAccessor(message, MessageHeaderAccessor.class);
 				Assert.state(mha != null && mha.isMutable(), "Mutable MessageHeaderAccessor required");

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,28 +26,29 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import org.springframework.core.ResolvableType;
-import org.springframework.core.codec.AbstractEncoderTestCase;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.testfixture.codec.AbstractEncoderTests;
 import org.springframework.http.MediaType;
-import org.springframework.http.codec.Pojo;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.http.codec.json.JacksonViewBean.MyJacksonView1;
 import org.springframework.http.codec.json.JacksonViewBean.MyJacksonView3;
+import org.springframework.http.converter.json.MappingJacksonValue;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
+import org.springframework.web.testfixture.xml.Pojo;
 
 import static java.util.Collections.singletonMap;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.http.MediaType.APPLICATION_NDJSON;
 import static org.springframework.http.MediaType.APPLICATION_OCTET_STREAM;
 import static org.springframework.http.MediaType.APPLICATION_STREAM_JSON;
 import static org.springframework.http.MediaType.APPLICATION_XML;
@@ -56,8 +57,7 @@ import static org.springframework.http.codec.json.Jackson2CodecSupport.JSON_VIEW
 /**
  * @author Sebastien Deleuze
  */
-public class Jackson2JsonEncoderTests extends AbstractEncoderTestCase<Jackson2JsonEncoder> {
-
+public class Jackson2JsonEncoderTests extends AbstractEncoderTests<Jackson2JsonEncoder> {
 
 	public Jackson2JsonEncoderTests() {
 		super(new Jackson2JsonEncoder());
@@ -67,18 +67,29 @@ public class Jackson2JsonEncoderTests extends AbstractEncoderTestCase<Jackson2Js
 	@Test
 	public void canEncode() {
 		ResolvableType pojoType = ResolvableType.forClass(Pojo.class);
-		assertTrue(this.encoder.canEncode(pojoType, APPLICATION_JSON));
-		assertTrue(this.encoder.canEncode(pojoType, APPLICATION_STREAM_JSON));
-		assertTrue(this.encoder.canEncode(pojoType, null));
+		assertThat(this.encoder.canEncode(pojoType, APPLICATION_JSON)).isTrue();
+		assertThat(this.encoder.canEncode(pojoType, APPLICATION_NDJSON)).isTrue();
+		assertThat(this.encoder.canEncode(pojoType, APPLICATION_STREAM_JSON)).isTrue();
+		assertThat(this.encoder.canEncode(pojoType, null)).isTrue();
+
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(Pojo.class),
+				new MediaType("application", "json", StandardCharsets.UTF_8))).isTrue();
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(Pojo.class),
+				new MediaType("application", "json", StandardCharsets.US_ASCII))).isTrue();
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(Pojo.class),
+				new MediaType("application", "json", StandardCharsets.ISO_8859_1))).isFalse();
 
 		// SPR-15464
-		assertTrue(this.encoder.canEncode(ResolvableType.NONE, null));
+		assertThat(this.encoder.canEncode(ResolvableType.NONE, null)).isTrue();
 
 		// SPR-15910
-		assertFalse(this.encoder.canEncode(ResolvableType.forClass(Object.class), APPLICATION_OCTET_STREAM));
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(Object.class), APPLICATION_OCTET_STREAM)).isFalse();
+
+
 	}
 
 	@Override
+	@Test
 	public void encode() throws Exception {
 		Flux<Object> input = Flux.just(new Pojo("foo", "bar"),
 				new Pojo("foofoo", "barbar"),
@@ -97,24 +108,25 @@ public class Jackson2JsonEncoderTests extends AbstractEncoderTestCase<Jackson2Js
 		MimeType textJavascript = new MimeType("text", "javascript", StandardCharsets.UTF_8);
 		Jackson2JsonEncoder encoder = new Jackson2JsonEncoder(new ObjectMapper(), textJavascript);
 
-		assertEquals(Collections.singletonList(textJavascript), encoder.getEncodableMimeTypes());
+		assertThat(encoder.getEncodableMimeTypes()).isEqualTo(Collections.singletonList(textJavascript));
 	}
 
-	@Test(expected = UnsupportedOperationException.class)
+	@Test
 	public void encodableMimeTypesIsImmutable() {
 		MimeType textJavascript = new MimeType("text", "javascript", StandardCharsets.UTF_8);
 		Jackson2JsonEncoder encoder = new Jackson2JsonEncoder(new ObjectMapper(), textJavascript);
 
-		encoder.getMimeTypes().add(new MimeType("text", "ecmascript"));
+		assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() ->
+				encoder.getMimeTypes().add(new MimeType("text", "ecmascript")));
 	}
 
 	@Test
 	public void canNotEncode() {
-		assertFalse(this.encoder.canEncode(ResolvableType.forClass(String.class), null));
-		assertFalse(this.encoder.canEncode(ResolvableType.forClass(Pojo.class), APPLICATION_XML));
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(String.class), null)).isFalse();
+		assertThat(this.encoder.canEncode(ResolvableType.forClass(Pojo.class), APPLICATION_XML)).isFalse();
 
 		ResolvableType sseType = ResolvableType.forClass(ServerSentEvent.class);
-		assertFalse(this.encoder.canEncode(sseType, APPLICATION_JSON));
+		assertThat(this.encoder.canEncode(sseType, APPLICATION_JSON)).isFalse();
 	}
 
 	@Test
@@ -203,6 +215,25 @@ public class Jackson2JsonEncoderTests extends AbstractEncoderTestCase<Jackson2Js
 				null, hints);
 	}
 
+	@Test
+	public void jacksonValue() {
+		JacksonViewBean bean = new JacksonViewBean();
+		bean.setWithView1("with");
+		bean.setWithView2("with");
+		bean.setWithoutView("without");
+
+		MappingJacksonValue jacksonValue = new MappingJacksonValue(bean);
+		jacksonValue.setSerializationView(MyJacksonView1.class);
+
+		ResolvableType type = ResolvableType.forClass(MappingJacksonValue.class);
+
+		testEncode(Mono.just(jacksonValue), type, step -> step
+						.consumeNextWith(expectString("{\"withView1\":\"with\"}")
+								.andThen(DataBufferUtils::release))
+						.verifyComplete(),
+				null, Collections.emptyMap());
+	}
+
 	@Test // gh-22771
 	public void encodeWithFlushAfterWriteOff() {
 		ObjectMapper mapper = new ObjectMapper();
@@ -216,6 +247,17 @@ public class Jackson2JsonEncoderTests extends AbstractEncoderTestCase<Jackson2Js
 				.consumeNextWith(expectString("[{\"foo\":\"foo\",\"bar\":\"bar\"}]"))
 				.expectComplete()
 				.verify(Duration.ofSeconds(5));
+	}
+
+	@Test
+	public void encodeAscii() {
+		Mono<Object> input = Mono.just(new Pojo("foo", "bar"));
+
+		testEncode(input, ResolvableType.forClass(Pojo.class), step -> step
+				.consumeNextWith(expectString("{\"foo\":\"foo\",\"bar\":\"bar\"}"))
+				.verifyComplete(),
+				new MimeType("application", "json", StandardCharsets.US_ASCII), null);
+
 	}
 
 

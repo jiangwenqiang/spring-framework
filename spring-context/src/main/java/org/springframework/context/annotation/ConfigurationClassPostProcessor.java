@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanDefinitionHolder;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter;
+import org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessor;
 import org.springframework.beans.factory.config.SingletonBeanRegistry;
 import org.springframework.beans.factory.parsing.FailFastProblemReporter;
 import org.springframework.beans.factory.parsing.PassThroughSourceExtractor;
@@ -48,15 +48,19 @@ import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.beans.factory.support.BeanNameGenerator;
+import org.springframework.context.ApplicationStartupAware;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.ResourceLoaderAware;
 import org.springframework.context.annotation.ConfigurationClassEnhancer.EnhancedConfiguration;
+import org.springframework.core.NativeDetector;
 import org.springframework.core.Ordered;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.metrics.ApplicationStartup;
+import org.springframework.core.metrics.StartupStep;
 import org.springframework.core.type.AnnotationMetadata;
 import org.springframework.core.type.MethodMetadata;
 import org.springframework.core.type.classreading.CachingMetadataReaderFactory;
@@ -71,20 +75,21 @@ import org.springframework.util.ClassUtils;
  *
  * <p>Registered by default when using {@code <context:annotation-config/>} or
  * {@code <context:component-scan/>}. Otherwise, may be declared manually as
- * with any other BeanFactoryPostProcessor.
+ * with any other {@link BeanFactoryPostProcessor}.
  *
  * <p>This post processor is priority-ordered as it is important that any
- * {@link Bean} methods declared in {@code @Configuration} classes have
+ * {@link Bean @Bean} methods declared in {@code @Configuration} classes have
  * their corresponding bean definitions registered before any other
- * {@link BeanFactoryPostProcessor} executes.
+ * {@code BeanFactoryPostProcessor} executes.
  *
  * @author Chris Beams
  * @author Juergen Hoeller
  * @author Phillip Webb
+ * @author Sam Brannen
  * @since 3.0
  */
 public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPostProcessor,
-		PriorityOrdered, ResourceLoaderAware, BeanClassLoaderAware, EnvironmentAware {
+		PriorityOrdered, ResourceLoaderAware, ApplicationStartupAware, BeanClassLoaderAware, EnvironmentAware {
 
 	/**
 	 * A {@code BeanNameGenerator} using fully qualified class names as default bean names.
@@ -95,14 +100,8 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 	 * @since 5.2
 	 * @see #setBeanNameGenerator
 	 */
-	public static final AnnotationBeanNameGenerator IMPORT_BEAN_NAME_GENERATOR = new AnnotationBeanNameGenerator() {
-		@Override
-		protected String buildDefaultBeanName(BeanDefinition definition) {
-			String beanClassName = definition.getBeanClassName();
-			Assert.state(beanClassName != null, "No bean class name set");
-			return beanClassName;
-		}
-	};
+	public static final AnnotationBeanNameGenerator IMPORT_BEAN_NAME_GENERATOR =
+			FullyQualifiedAnnotationBeanNameGenerator.INSTANCE;
 
 	private static final String IMPORT_REGISTRY_BEAN_NAME =
 			ConfigurationClassPostProcessor.class.getName() + ".importRegistry";
@@ -140,6 +139,8 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 
 	/* Using fully qualified class names as default bean names by default. */
 	private BeanNameGenerator importBeanNameGenerator = IMPORT_BEAN_NAME_GENERATOR;
+
+	private ApplicationStartup applicationStartup = ApplicationStartup.DEFAULT;
 
 
 	@Override
@@ -222,6 +223,10 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 		}
 	}
 
+	@Override
+	public void setApplicationStartup(ApplicationStartup applicationStartup) {
+		this.applicationStartup = applicationStartup;
+	}
 
 	/**
 	 * Derive further bean definitions from the configuration classes in the registry.
@@ -322,6 +327,7 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 		Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
 		Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
 		do {
+			StartupStep processConfig = this.applicationStartup.start("spring.context.config-classes.parse");
 			parser.parse(candidates);
 			parser.validate();
 
@@ -336,6 +342,7 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			}
 			this.reader.loadBeanDefinitions(configClasses);
 			alreadyParsed.addAll(configClasses);
+			processConfig.tag("classCount", () -> String.valueOf(configClasses.size())).end();
 
 			candidates.clear();
 			if (registry.getBeanDefinitionCount() > candidateNames.length) {
@@ -378,25 +385,35 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 	 * @see ConfigurationClassEnhancer
 	 */
 	public void enhanceConfigurationClasses(ConfigurableListableBeanFactory beanFactory) {
+		StartupStep enhanceConfigClasses = this.applicationStartup.start("spring.context.config-classes.enhance");
 		Map<String, AbstractBeanDefinition> configBeanDefs = new LinkedHashMap<>();
 		for (String beanName : beanFactory.getBeanDefinitionNames()) {
 			BeanDefinition beanDef = beanFactory.getBeanDefinition(beanName);
 			Object configClassAttr = beanDef.getAttribute(ConfigurationClassUtils.CONFIGURATION_CLASS_ATTRIBUTE);
+			AnnotationMetadata annotationMetadata = null;
 			MethodMetadata methodMetadata = null;
 			if (beanDef instanceof AnnotatedBeanDefinition) {
-				methodMetadata = ((AnnotatedBeanDefinition) beanDef).getFactoryMethodMetadata();
+				AnnotatedBeanDefinition annotatedBeanDefinition = (AnnotatedBeanDefinition) beanDef;
+				annotationMetadata = annotatedBeanDefinition.getMetadata();
+				methodMetadata = annotatedBeanDefinition.getFactoryMethodMetadata();
 			}
 			if ((configClassAttr != null || methodMetadata != null) && beanDef instanceof AbstractBeanDefinition) {
 				// Configuration class (full or lite) or a configuration-derived @Bean method
-				// -> resolve bean class at this point...
+				// -> eagerly resolve bean class at this point, unless it's a 'lite' configuration
+				// or component class without @Bean methods.
 				AbstractBeanDefinition abd = (AbstractBeanDefinition) beanDef;
 				if (!abd.hasBeanClass()) {
-					try {
-						abd.resolveBeanClass(this.beanClassLoader);
-					}
-					catch (Throwable ex) {
-						throw new IllegalStateException(
-								"Cannot load configuration class: " + beanDef.getBeanClassName(), ex);
+					boolean liteConfigurationCandidateWithoutBeanMethods =
+							(ConfigurationClassUtils.CONFIGURATION_CLASS_LITE.equals(configClassAttr) &&
+								annotationMetadata != null && !ConfigurationClassUtils.hasBeanMethods(annotationMetadata));
+					if (!liteConfigurationCandidateWithoutBeanMethods) {
+						try {
+							abd.resolveBeanClass(this.beanClassLoader);
+						}
+						catch (Throwable ex) {
+							throw new IllegalStateException(
+									"Cannot load configuration class: " + beanDef.getBeanClassName(), ex);
+						}
 					}
 				}
 			}
@@ -414,8 +431,9 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 				configBeanDefs.put(beanName, (AbstractBeanDefinition) beanDef);
 			}
 		}
-		if (configBeanDefs.isEmpty()) {
+		if (configBeanDefs.isEmpty() || NativeDetector.inNativeImage()) {
 			// nothing to enhance -> return immediately
+			enhanceConfigClasses.end();
 			return;
 		}
 
@@ -435,10 +453,11 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 				beanDef.setBeanClass(enhancedClass);
 			}
 		}
+		enhanceConfigClasses.tag("classCount", () -> String.valueOf(configBeanDefs.keySet().size())).end();
 	}
 
 
-	private static class ImportAwareBeanPostProcessor extends InstantiationAwareBeanPostProcessorAdapter {
+	private static class ImportAwareBeanPostProcessor implements InstantiationAwareBeanPostProcessor {
 
 		private final BeanFactory beanFactory;
 

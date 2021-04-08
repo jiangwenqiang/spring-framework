@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2018 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,15 @@ package org.springframework.http.server.reactive;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.concurrent.atomic.AtomicLong;
+
 import javax.net.ssl.SSLSession;
 
+import io.netty.channel.Channel;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.cookie.Cookie;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.commons.logging.Log;
 import reactor.core.publisher.Flux;
 import reactor.netty.Connection;
 import reactor.netty.http.server.HttpServerRequest;
@@ -31,9 +35,10 @@ import reactor.netty.http.server.HttpServerRequest;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.NettyDataBufferFactory;
 import org.springframework.http.HttpCookie;
-import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpLogging;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
@@ -46,6 +51,16 @@ import org.springframework.util.MultiValueMap;
  */
 class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 
+	/** Reactor Netty 1.0.5+. */
+	static final boolean reactorNettyRequestChannelOperationsIdPresent = ClassUtils.isPresent(
+			"reactor.netty.ChannelOperationsId", ReactorServerHttpRequest.class.getClassLoader());
+
+	private static final Log logger = HttpLogging.forLogName(ReactorServerHttpRequest.class);
+
+
+	private static final AtomicLong logPrefixIndex = new AtomicLong();
+
+
 	private final HttpServerRequest request;
 
 	private final NettyDataBufferFactory bufferFactory;
@@ -54,7 +69,7 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 	public ReactorServerHttpRequest(HttpServerRequest request, NettyDataBufferFactory bufferFactory)
 			throws URISyntaxException {
 
-		super(initUri(request), "", initHeaders(request));
+		super(initUri(request), "", new NettyHeadersAdapter(request.requestHeaders()));
 		Assert.notNull(bufferFactory, "DataBufferFactory must not be null");
 		this.request = request;
 		this.bufferFactory = bufferFactory;
@@ -91,6 +106,7 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 		}
 		else {
 			InetSocketAddress localAddress = request.hostAddress();
+			Assert.state(localAddress != null, "No host address available");
 			return new URI(scheme, null, localAddress.getHostString(),
 					localAddress.getPort(), null, null, null);
 		}
@@ -122,11 +138,6 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 		return uri;
 	}
 
-	private static HttpHeaders initHeaders(HttpServerRequest channel) {
-		NettyHeadersAdapter headersMap = new NettyHeadersAdapter(channel.requestHeaders());
-		return new HttpHeaders(headersMap);
-	}
-
 
 	@Override
 	public String getMethodValue() {
@@ -146,6 +157,13 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 	}
 
 	@Override
+	@Nullable
+	public InetSocketAddress getLocalAddress() {
+		return this.request.hostAddress();
+	}
+
+	@Override
+	@Nullable
 	public InetSocketAddress getRemoteAddress() {
 		return this.request.remoteAddress();
 	}
@@ -153,7 +171,11 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 	@Override
 	@Nullable
 	protected SslInfo initSslInfo() {
-		SslHandler sslHandler = ((Connection) this.request).channel().pipeline().get(SslHandler.class);
+		Channel channel = ((Connection) this.request).channel();
+		SslHandler sslHandler = channel.pipeline().get(SslHandler.class);
+		if (sslHandler == null && channel.parent() != null) { // HTTP/2
+			sslHandler = channel.parent().pipeline().get(SslHandler.class);
+		}
 		if (sslHandler != null) {
 			SSLSession session = sslHandler.engine().getSession();
 			return new DefaultSslInfo(session);
@@ -175,8 +197,28 @@ class ReactorServerHttpRequest extends AbstractServerHttpRequest {
 	@Override
 	@Nullable
 	protected String initId() {
-		return this.request instanceof Connection ?
-				((Connection) this.request).channel().id().asShortText() : null;
+		if (reactorNettyRequestChannelOperationsIdPresent) {
+			return (ChannelOperationsIdHelper.getId(this.request));
+		}
+		if (this.request instanceof Connection) {
+			return ((Connection) this.request).channel().id().asShortText() +
+					"-" + logPrefixIndex.incrementAndGet();
+		}
+		return null;
+	}
+
+
+	private static class ChannelOperationsIdHelper {
+
+		@Nullable
+		public static String getId(HttpServerRequest request) {
+			if (request instanceof reactor.netty.ChannelOperationsId) {
+				return (logger.isDebugEnabled() ?
+						((reactor.netty.ChannelOperationsId) request).asLongText() :
+						((reactor.netty.ChannelOperationsId) request).asShortText());
+			}
+			return null;
+		}
 	}
 
 }

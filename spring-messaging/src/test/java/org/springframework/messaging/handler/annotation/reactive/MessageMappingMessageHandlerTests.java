@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -35,7 +35,6 @@ import org.springframework.core.codec.StringDecoder;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.DestinationPatternsMessageCondition;
@@ -51,7 +50,7 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.util.SimpleRouteMatcher;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Unit tests for {@link MessageMappingMessageHandler}.
@@ -59,9 +58,6 @@ import static org.junit.Assert.assertTrue;
  */
 @SuppressWarnings("ALL")
 public class MessageMappingMessageHandlerTests {
-
-	private static final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
-
 
 	private TestEncoderMethodReturnValueHandler returnValueHandler;
 
@@ -123,8 +119,7 @@ public class MessageMappingMessageHandlerTests {
 						new SimpleRouteMatcher(new AntPathMatcher()).parseRoute("string")));
 
 		StepVerifier.create(initMesssageHandler().handleMessage(message))
-				.expectErrorSatisfies(ex -> assertTrue("Actual: " + ex.getMessage(),
-						ex.getMessage().startsWith("Could not resolve method parameter at index 0")))
+				.expectErrorSatisfies(ex -> assertThat(ex.getMessage().startsWith("Could not resolve method parameter at index 0")).as("Actual: " + ex.getMessage()).isTrue())
 				.verify(Duration.ofSeconds(5));
 	}
 
@@ -164,7 +159,7 @@ public class MessageMappingMessageHandlerTests {
 	}
 
 	private DataBuffer toDataBuffer(String payload) {
-		return bufferFactory.wrap(payload.getBytes(UTF_8));
+		return DefaultDataBufferFactory.sharedInstance.wrap(payload.getBytes(UTF_8));
 	}
 
 	private void verifyOutputContent(List<String> expected) {

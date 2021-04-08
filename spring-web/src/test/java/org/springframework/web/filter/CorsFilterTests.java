@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,21 +18,22 @@ package org.springframework.web.filter;
 
 import java.io.IOException;
 import java.util.Arrays;
+
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.mock.web.test.MockHttpServletRequest;
-import org.springframework.mock.web.test.MockHttpServletResponse;
 import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.testfixture.servlet.MockHttpServletRequest;
+import org.springframework.web.testfixture.servlet.MockHttpServletResponse;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /**
  * Unit tests for {@link CorsFilter}.
@@ -44,32 +45,37 @@ public class CorsFilterTests {
 
 	private final CorsConfiguration config = new CorsConfiguration();
 
-	@Before
-	public void setup() throws Exception {
+
+	@BeforeEach
+	void setup() {
 		config.setAllowedOrigins(Arrays.asList("https://domain1.com", "https://domain2.com"));
 		config.setAllowedMethods(Arrays.asList("GET", "POST"));
 		config.setAllowedHeaders(Arrays.asList("header1", "header2"));
 		config.setExposedHeaders(Arrays.asList("header3", "header4"));
 		config.setMaxAge(123L);
 		config.setAllowCredentials(false);
-		filter = new CorsFilter(r -> config);
+
+		UrlBasedCorsConfigurationSource configSource = new UrlBasedCorsConfigurationSource();
+		configSource.registerCorsConfiguration("/**", config);
+
+		filter = new CorsFilter(configSource);
 	}
 
 	@Test
-	public void nonCorsRequest() throws ServletException, IOException {
+	void nonCorsRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.GET.name(), "/test.html");
 		MockHttpServletResponse response = new MockHttpServletResponse();
 
 		FilterChain filterChain = (filterRequest, filterResponse) -> {
-			assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
-			assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS));
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).isNull();
 		};
 		filter.doFilter(request, response, filterChain);
 	}
 
 	@Test
-	public void sameOriginRequest() throws ServletException, IOException {
+	void sameOriginRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.GET.name(), "https://domain1.com/test.html");
 		request.addHeader(HttpHeaders.ORIGIN, "https://domain1.com");
@@ -79,14 +85,14 @@ public class CorsFilterTests {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 
 		FilterChain filterChain = (filterRequest, filterResponse) -> {
-			assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
-			assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS));
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).isNull();
 		};
 		filter.doFilter(request, response, filterChain);
 	}
 
 	@Test
-	public void validActualRequest() throws ServletException, IOException {
+	void validActualRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.GET.name(), "/test.html");
 		request.addHeader(HttpHeaders.ORIGIN, "https://domain2.com");
@@ -94,14 +100,14 @@ public class CorsFilterTests {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 
 		FilterChain filterChain = (filterRequest, filterResponse) -> {
-			assertEquals("https://domain2.com", response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
-			assertEquals("header3, header4", response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS));
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://domain2.com");
+			assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).isEqualTo("header3, header4");
 		};
 		filter.doFilter(request, response, filterChain);
 	}
 
 	@Test
-	public void invalidActualRequest() throws ServletException, IOException {
+	void invalidActualRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.DELETE.name(), "/test.html");
 		request.addHeader(HttpHeaders.ORIGIN, "https://domain2.com");
@@ -111,11 +117,11 @@ public class CorsFilterTests {
 		FilterChain filterChain = (filterRequest, filterResponse) ->
 			fail("Invalid requests must not be forwarded to the filter chain");
 		filter.doFilter(request, response, filterChain);
-		assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
+		assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
 	}
 
 	@Test
-	public void validPreFlightRequest() throws ServletException, IOException {
+	void validPreFlightRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.OPTIONS.name(), "/test.html");
 		request.addHeader(HttpHeaders.ORIGIN, "https://domain2.com");
@@ -127,14 +133,14 @@ public class CorsFilterTests {
 				fail("Preflight requests must not be forwarded to the filter chain");
 		filter.doFilter(request, response, filterChain);
 
-		assertEquals("https://domain2.com", response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
-		assertEquals("header1, header2", response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS));
-		assertEquals("header3, header4", response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS));
-		assertEquals(123L, Long.parseLong(response.getHeader(HttpHeaders.ACCESS_CONTROL_MAX_AGE)));
+		assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://domain2.com");
+		assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS)).isEqualTo("header1, header2");
+		assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).isEqualTo("header3, header4");
+		assertThat(Long.parseLong(response.getHeader(HttpHeaders.ACCESS_CONTROL_MAX_AGE))).isEqualTo(123L);
 	}
 
 	@Test
-	public void invalidPreFlightRequest() throws ServletException, IOException {
+	void invalidPreFlightRequest() throws ServletException, IOException {
 
 		MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.OPTIONS.name(), "/test.html");
 		request.addHeader(HttpHeaders.ORIGIN, "https://domain2.com");
@@ -146,7 +152,7 @@ public class CorsFilterTests {
 				fail("Preflight requests must not be forwarded to the filter chain");
 		filter.doFilter(request, response, filterChain);
 
-		assertNull(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
+		assertThat(response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
 	}
 
 }
